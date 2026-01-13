@@ -6,14 +6,15 @@ from app.schemas import PolicyIngestRequest, TaskSchema, AuditLogSchema, TaskSta
 
 app = FastAPI()
 
-from app.db import db
+from app.db import get_db
 
 @app.get("/")
 def read_root():
-    return {"message": "Backend is running"}
+    return {"status": "ok"}
 
 @app.post("/policies/ingest", response_model=list[TaskSchema])
 async def ingest_policy(request: PolicyIngestRequest):
+    db = get_db()
     # 1. Save Policy
     policy_doc = request.model_dump()
     policy_doc["status"] = "ACTIVE"
@@ -60,6 +61,7 @@ async def ingest_policy(request: PolicyIngestRequest):
 
 @app.get("/tasks", response_model=list[TaskSchema])
 async def get_tasks(role: str):
+    db = get_db()
     query = {}
     # Case-insensitive check for Admin
     if role.lower() != "admin":
@@ -77,6 +79,7 @@ async def get_tasks(role: str):
 @app.post("/tasks/{task_id}/update-status", response_model=TaskSchema)
 async def update_task_status(task_id: str, request: TaskUpdateStatusRequest):
     from fastapi import HTTPException
+    db = get_db()
 
     task = await db.tasks.find_one({"task_id": task_id})
     if not task:
@@ -119,6 +122,7 @@ async def update_task_status(task_id: str, request: TaskUpdateStatusRequest):
 @app.post("/tasks/{task_id}/escalate", response_model=TaskSchema)
 async def escalate_task(task_id: str, request: TaskEscalateRequest):
     from fastapi import HTTPException
+    db = get_db()
 
     task = await db.tasks.find_one({"task_id": task_id})
     if not task:
