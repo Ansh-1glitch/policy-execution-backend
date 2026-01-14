@@ -91,26 +91,32 @@ def generate_policy_pdf(nlp_data: dict, file_name: str = "policy.pdf") -> BytesI
     
     if rules:
         # Rules table header
-        rules_data = [['Rule ID', 'Action', 'Responsible Role', 'Deadline']]
+        rules_data = [['Rule ID', 'Action', 'Role', 'Deadline']]
         
-        # Add each rule
+        # Add each rule with Paragraph for text wrapping
         for rule in rules:
+            # Use Paragraph for action text to enable wrapping
+            action_text = rule.get('action', 'N/A')
+            action_para = Paragraph(action_text, styles['Normal'])
+            
             rules_data.append([
-                rule.get('rule_id', 'N/A'),
-                rule.get('action', 'N/A'),
-                rule.get('responsible_role', 'N/A'),
-                rule.get('deadline', 'Not specified')
+                Paragraph(rule.get('rule_id', 'N/A'), styles['Normal']),
+                action_para,  # Wrapped text
+                Paragraph(rule.get('responsible_role', 'N/A'), styles['Normal']),
+                Paragraph(rule.get('deadline', 'Not specified'), styles['Normal'])
             ])
         
-        rules_table = Table(rules_data, colWidths=[1*inch, 2.5*inch, 1.5*inch, 1.5*inch])
+        # Adjusted column widths to prevent text overlap
+        rules_table = Table(rules_data, colWidths=[0.8*inch, 3.2*inch, 1.2*inch, 1.3*inch])
         rules_table.setStyle(TableStyle([
             # Header styling
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2E3192')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 11),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('TOPPADDING', (0, 0), (-1, 0), 12),
             
             # Body styling
             ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
@@ -120,6 +126,10 @@ def generate_policy_pdf(nlp_data: dict, file_name: str = "policy.pdf") -> BytesI
             ('GRID', (0, 0), (-1, -1), 1, colors.grey),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F5F5F5')]),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
         ]))
         
         elements.append(rules_table)
