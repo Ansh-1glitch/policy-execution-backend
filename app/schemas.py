@@ -46,3 +46,16 @@ class TaskUpdateStatusRequest(BaseModel):
 class TaskEscalateRequest(BaseModel):
     role: str
 
+# NLP Results Schemas
+class NLPResultSchema(BaseModel):
+    result_id: str
+    policy_id: str
+    file_name: str
+    upload_timestamp: datetime
+    nlp_data: dict
+    status: str = "completed"
+
+class SaveNLPResultRequest(BaseModel):
+    policy_id: str
+    file_name: str
+    nlp_data: dict

@@ -1,9 +1,15 @@
 import uuid
 from datetime import datetime
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorClient
-from app.schemas import PolicyIngestRequest, TaskSchema, AuditLogSchema, TaskStatus, TaskUpdateStatusRequest, TaskEscalateRequest
+from app.schemas import (
+    PolicyIngestRequest, TaskSchema, AuditLogSchema, TaskStatus, 
+    TaskUpdateStatusRequest, TaskEscalateRequest,
+    SaveNLPResultRequest, NLPResultSchema
+)
+from app.pdf_generator import generate_policy_pdf
 
 app = FastAPI()
 
@@ -301,3 +307,119 @@ async def get_policy_stats():
         "completed_tasks": completed_tasks,
         "escalated_tasks": escalated_tasks
     }
+
+# NLP Results Endpoints
+
+@app.post("/nlp-results/save")
+async def save_nlp_result(request: SaveNLPResultRequest):
+    """
+    Save NLP processing results to database
+    
+    This endpoint stores the complete NLP output including all extracted rules
+    and metadata for later retrieval and PDF generation.
+    """
+    db = get_db()
+    
+    result_id = str(uuid.uuid4())
+    
+    nlp_result = {
+        "result_id": result_id,
+        "policy_id": request.policy_id,
+        "file_name": request.file_name,
+        "upload_timestamp": datetime.utcnow(),
+        "nlp_data": request.nlp_data,
+        "status": "completed"
+    }
+    
+    await db.nlp_results.insert_one(nlp_result)
+    
+    return {
+        "result_id": result_id,
+        "message": "NLP results saved successfully"
+    }
+
+@app.get("/nlp-results")
+async def get_nlp_results():
+    """
+    Get list of all NLP processing results
+    
+    Returns metadata for all stored NLP results without the full data payload.
+    """
+    db = get_db()
+    
+    results = []
+    cursor = db.nlp_results.find().sort("upload_timestamp", -1)
+    
+    async for document in cursor:
+        document["_id"] = str(document["_id"])
+        # Don't include full nlp_data in list view
+        result_summary = {
+            "result_id": document["result_id"],
+            "policy_id": document["policy_id"],
+            "file_name": document["file_name"],
+            "upload_timestamp": document["upload_timestamp"].isoformat(),
+            "status": document["status"]
+        }
+        results.append(result_summary)
+    
+    return results
+
+@app.get("/nlp-results/{result_id}")
+async def get_nlp_result(result_id: str):
+    """
+    Get specific NLP result by ID
+    
+    Returns the complete NLP data including all rules and metadata.
+    """
+    db = get_db()
+    
+    result = await db.nlp_results.find_one({"result_id": result_id})
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="NLP result not found")
+    
+    result["_id"] = str(result["_id"])
+    result["upload_timestamp"] = result["upload_timestamp"].isoformat()
+    
+    return result
+
+@app.get("/nlp-results/{result_id}/download-pdf")
+async def download_pdf(result_id: str):
+    """
+    Download PDF of NLP results
+    
+    Generates and returns a formatted PDF document containing the policy rules
+    and metadata extracted by the NLP system.
+    """
+    db = get_db()
+    
+    # Fetch NLP result from database
+    result = await db.nlp_results.find_one({"result_id": result_id})
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="NLP result not found")
+    
+    # Generate PDF
+    try:
+        pdf_buffer = generate_policy_pdf(
+            nlp_data=result["nlp_data"],
+            file_name=result["file_name"]
+        )
+        
+        # Create filename
+        safe_policy_id = result["policy_id"].replace("/", "_").replace("\\", "_")
+        filename = f"policy_{safe_policy_id}.pdf"
+        
+        # Return PDF as streaming response
+        return StreamingResponse(
+            pdf_buffer,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generating PDF: {str(e)}"
+        )
