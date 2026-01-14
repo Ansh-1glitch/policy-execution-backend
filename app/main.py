@@ -70,13 +70,27 @@ async def ingest_policy(request: PolicyIngestRequest):
     return created_tasks
 
 @app.get("/tasks", response_model=list[TaskSchema])
-async def get_tasks(role: str):
+async def get_tasks(role: str = None):
+    """
+    Get tasks, optionally filtered by role.
+    
+    Args:
+        role: Optional role filter (Admin, Officer, Clerk)
+              If not provided, returns all tasks
+    
+    Returns:
+        List of tasks (all tasks or filtered by role)
+    """
     db = get_db()
     query = {}
-    # Case-insensitive check for Admin
-    if role.lower() != "admin":
-        # Case-insensitive regex for assigned_role
-        query["assigned_role"] = {"$regex": f"^{role}$", "$options": "i"}
+    
+    # Only filter by role if role parameter is provided
+    if role:
+        # Case-insensitive check for Admin
+        if role.lower() != "admin":
+            # Case-insensitive regex for assigned_role
+            query["assigned_role"] = {"$regex": f"^{role}$", "$options": "i"}
+        # If role is Admin, query remains empty (returns all tasks)
 
     tasks = []
     cursor = db.tasks.find(query)
