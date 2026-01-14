@@ -1,10 +1,20 @@
 import uuid
 from datetime import datetime
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from app.schemas import PolicyIngestRequest, TaskSchema, AuditLogSchema, TaskStatus, TaskUpdateStatusRequest, TaskEscalateRequest
 
 app = FastAPI()
+
+# CORS Configuration - Allow frontend to access backend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with specific frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 from app.db import get_db
 
@@ -166,3 +176,114 @@ async def escalate_task(task_id: str, request: TaskEscalateRequest):
     updated_task = await db.tasks.find_one({"task_id": task_id})
     updated_task["_id"] = str(updated_task["_id"])
     return updated_task
+
+@app.get("/audit-logs")
+async def get_audit_logs(limit: int = 50):
+    """
+    Get audit trail of all task actions
+    Returns logs in reverse chronological order (newest first)
+    """
+    db = get_db()
+    
+    logs = []
+    cursor = db.audit_logs.find().sort("timestamp", -1).limit(limit)
+    
+    async for document in cursor:
+        document["_id"] = str(document["_id"])
+        # Format timestamp to HH:MM
+        if isinstance(document.get("timestamp"), datetime):
+            document["timestamp"] = document["timestamp"].strftime("%H:%M")
+        logs.append(document)
+    
+    return logs
+
+@app.get("/activity/recent")
+async def get_recent_activity(limit: int = 20):
+    """
+    Get recent system activity for timeline display
+    """
+    from datetime import datetime, timedelta
+    db = get_db()
+    
+    activities = []
+    
+    # Get recent audit logs and convert to activities
+    cursor = db.audit_logs.find().sort("timestamp", -1).limit(limit)
+    
+    async for log in cursor:
+        # Determine activity type and description based on action
+        action = log.get("action", "")
+        activity_type = "processing"
+        title = "Task Action"
+        description = action
+        
+        if "CREATED" in action:
+            activity_type = "upload"
+            title = "Task Created"
+            description = f"New task created for {log.get('performed_by_role', 'System')}"
+        elif "STATUS_UPDATE" in action:
+            activity_type = "processing"
+            title = "Task Status Updated"
+            description = action
+        elif "ESCALATION" in action:
+            activity_type = "approval"
+            title = "Task Escalated"
+            description = action
+        
+        # Calculate relative time
+        timestamp = log.get("timestamp")
+        if isinstance(timestamp, datetime):
+            time_diff = datetime.utcnow() - timestamp
+            if time_diff.seconds < 3600:
+                time_ago = f"{time_diff.seconds // 60} minutes ago"
+            elif time_diff.seconds < 86400:
+                time_ago = f"{time_diff.seconds // 3600} hours ago"
+            else:
+                time_ago = f"{time_diff.days} days ago"
+        else:
+            time_ago = "recently"
+        
+        activity = {
+            "id": str(log.get("_id", "")),
+            "type": activity_type,
+            "title": title,
+            "description": description,
+            "timestamp": time_ago,
+            "user": log.get("performed_by_role", "System"),
+            "status": "completed"
+        }
+        activities.append(activity)
+    
+    return activities
+
+@app.get("/policies/stats")
+async def get_policy_stats():
+    """
+    Get policy and task statistics for dashboard metrics
+    """
+    db = get_db()
+    
+    # Count policies
+    total_policies = await db.policies.count_documents({})
+    active_policies = await db.policies.count_documents({"status": "ACTIVE"})
+    
+    # Count tasks by status
+    total_tasks = await db.tasks.count_documents({})
+    created_tasks = await db.tasks.count_documents({"status": "CREATED"})
+    assigned_tasks = await db.tasks.count_documents({"status": "ASSIGNED"})
+    in_progress_tasks = await db.tasks.count_documents({"status": "IN_PROGRESS"})
+    completed_tasks = await db.tasks.count_documents({"status": "COMPLETED"})
+    escalated_tasks = await db.tasks.count_documents({"status": "ESCALATED"})
+    
+    return {
+        "total_policies": total_policies,
+        "active_policies": active_policies,
+        "completed_policies": 0,  # Can be calculated based on all tasks completed
+        "pending_policies": total_policies - active_policies,
+        "total_tasks": total_tasks,
+        "created_tasks": created_tasks,
+        "assigned_tasks": assigned_tasks,
+        "in_progress_tasks": in_progress_tasks,
+        "completed_tasks": completed_tasks,
+        "escalated_tasks": escalated_tasks
+    }
