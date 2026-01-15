@@ -12,11 +12,13 @@ class TaskStatus(str, Enum):
 
 class PolicySchema(BaseModel):
     policy_id: str
+    file_name: Optional[str] = None
     status: str = "ACTIVE"
 
 class TaskSchema(BaseModel):
     task_id: str
     policy_id: str
+    file_name: Optional[str] = None
     rule_id: str
     task_name: str
     assigned_role: str
@@ -37,6 +39,8 @@ class IngestRule(BaseModel):
 
 class PolicyIngestRequest(BaseModel):
     policy_id: str
+    file_name: Optional[str] = None
+    reset_db: bool = False
     rules: list[IngestRule]
 
 class TaskUpdateStatusRequest(BaseModel):

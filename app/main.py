@@ -32,9 +32,22 @@ def read_root():
 @app.post("/policies/ingest", response_model=list[TaskSchema])
 async def ingest_policy(request: PolicyIngestRequest):
     db = get_db()
+    
+    # 0. Check for Reset Flag
+    if request.reset_db:
+        # Clear all main collections
+        await db.policies.delete_many({})
+        await db.tasks.delete_many({})
+        await db.audit_logs.delete_many({})
+        await db.nlp_results.delete_many({})
+        
     # 1. Save Policy
     policy_doc = request.model_dump()
     policy_doc["status"] = "ACTIVE"
+    # Ensure file_name is saved if present
+    if request.file_name:
+        policy_doc["file_name"] = request.file_name
+        
     await db.policies.insert_one(policy_doc)
 
     created_tasks = []
@@ -50,6 +63,7 @@ async def ingest_policy(request: PolicyIngestRequest):
         task = TaskSchema(
             task_id=task_id,
             policy_id=request.policy_id,
+            file_name=request.file_name,  # Pass file_name to task
             rule_id=rule.rule_id,
             task_name=f"Execute rule {rule.rule_id}",
             assigned_role=rule.responsible_role,
@@ -307,6 +321,105 @@ async def get_policy_stats():
         "in_progress_tasks": in_progress_tasks,
         "completed_tasks": completed_tasks,
         "escalated_tasks": escalated_tasks
+    }
+
+@app.get("/policies/stats/{policy_id}")
+async def get_single_policy_stats(policy_id: str):
+    """
+    Get execution statistics for a specific policy
+    """
+    db = get_db()
+    
+    # Verify policy exists
+    policy = await db.policies.find_one({"policy_id": policy_id})
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+
+    # Get all tasks for this policy
+    tasks_cursor = db.tasks.find({"policy_id": policy_id})
+    tasks = await tasks_cursor.to_list(length=None)
+    
+    total_tasks = len(tasks)
+    
+    # Initialize counters
+    tasks_by_status = {
+        "CREATED": 0,
+        "ASSIGNED": 0,
+        "IN_PROGRESS": 0,
+        "COMPLETED": 0,
+        "ESCALATED": 0
+    }
+    
+    tasks_by_role = {}
+    
+    # Aggregate counts
+    for task in tasks:
+        # Status counts
+        status = task.get("status", "CREATED")
+        tasks_by_status[status] = tasks_by_status.get(status, 0) + 1
+        
+        # Role counts
+        role = task.get("assigned_role", "Unknown")
+        tasks_by_role[role] = tasks_by_role.get(role, 0) + 1
+        
+    # Calculate completion rate
+    completion_rate = 0
+    if total_tasks > 0:
+        completed = tasks_by_status.get("COMPLETED", 0)
+        completion_rate = int((completed / total_tasks) * 100)
+        
+    return {
+        "policy_id": policy_id,
+        "total_tasks": total_tasks,
+        "tasks_by_status": tasks_by_status,
+        "tasks_by_role": tasks_by_role,
+        "completion_rate_percent": completion_rate,
+        "average_completion_time_hours": 0  # Placeholder for future implementation
+    }
+
+@app.get("/analytics/performance")
+async def get_performance_stats():
+    """
+    Get performance statistics for the dashboard chart (Mock Data)
+    """
+    return {
+        "range": "7d",
+        "data": [
+            { "name": "Mon", "uploads": 10, "processed": 8, "exported": 5 },
+            { "name": "Tue", "uploads": 15, "processed": 12, "exported": 10 },
+            { "name": "Wed", "uploads": 8, "processed": 7, "exported": 6 },
+            { "name": "Thu", "uploads": 20, "processed": 18, "exported": 15 },
+            { "name": "Fri", "uploads": 12, "processed": 10, "exported": 8 },
+            { "name": "Sat", "uploads": 5, "processed": 5, "exported": 2 },
+            { "name": "Sun", "uploads": 3, "processed": 3, "exported": 1 }
+        ]
+    }
+
+@app.get("/system/storage")
+async def get_storage_stats():
+    """
+    Get storage usage statistics (Mock Data)
+    """
+    return {
+        "total_storage_gb": 100,
+        "used_storage_gb": 45.5,
+        "available_gb": 54.5,
+        "breakdown": [
+            { "name": "Documents", "value": 30, "color": "#00FFFF" },
+            { "name": "Processed Data", "value": 15.5, "color": "#8A2BE2" }
+        ]
+    }
+
+@app.get("/system/health")
+async def get_system_health():
+    """
+    Get system health metrics (Mock Data)
+    """
+    return {
+        "metrics": [
+            { "name": "Database", "status": "healthy", "value": "99.9%", "icon": "CircleStackIcon" },
+            { "name": "API Latency", "status": "healthy", "value": "120ms", "icon": "ClockIcon" }
+        ]
     }
 
 # NLP Results Endpoints
